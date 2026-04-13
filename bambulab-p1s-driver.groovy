@@ -120,6 +120,7 @@ def installed() {
     log.info "[BambuP1S] Driver installed"
     state.printStartTime = null
     initializeState()
+    createChamberLightChild()
 }
 
 def updated() {
@@ -132,6 +133,7 @@ def updated() {
 def initialize() {
     log.info "[BambuP1S] Initializing"
     initializeState()
+    createChamberLightChild()
     connect()
     scheduleRefresh()
 }
@@ -149,6 +151,53 @@ def scheduledRefresh() {
 def uninstalled() {
     disconnect()
     unschedule()
+    deleteChildDevices()
+}
+
+// ──────────────────────────────────────────────────────────────
+//  Child device management
+// ──────────────────────────────────────────────────────────────
+
+private void createChamberLightChild() {
+    String childDni = "${device.deviceNetworkId}-chamberlight"
+    if (!getChildDevice(childDni)) {
+        try {
+            addChildDevice("hubitat", "Generic Component Switch", childDni,
+                [name: "${device.displayName} Chamber Light", isComponent: false])
+            log.info "[BambuP1S] Chamber light child device created"
+        } catch (e) {
+            log.error "[BambuP1S] Failed to create chamber light child device: ${e.message}"
+        }
+    }
+}
+
+private void deleteChildDevices() {
+    getChildDevices().each { deleteChildDevice(it.deviceNetworkId) }
+}
+
+// Called by Generic Component Switch child when turned on
+void componentOn(cd) {
+    debugLog("componentOn called by child: ${cd.displayName}")
+    lightOn()
+}
+
+// Called by Generic Component Switch child when turned off
+void componentOff(cd) {
+    debugLog("componentOff called by child: ${cd.displayName}")
+    lightOff()
+}
+
+// Called by Generic Component Switch child on refresh
+void componentRefresh(cd) {
+    debugLog("componentRefresh called by child: ${cd.displayName}")
+    refresh()
+}
+
+private void syncChamberLightChild(String lightState) {
+    def child = getChildDevice("${device.deviceNetworkId}-chamberlight")
+    if (child) {
+        child.parse([[name: "switch", value: lightState, descriptionText: "${child.displayName} is ${lightState}"]])
+    }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -173,16 +222,19 @@ def connect() {
             clientId,
             "bblp",
             lanAccessCode as String,
-            ignoreSSLIssues: true   // accept self-signed cert
+            [ignoreSSLIssues: true]   // accept self-signed cert
         )
         // mqttClientStatus() callback will fire on connect/disconnect
     } catch (e) {
-        log.error "[BambuP1S] MQTT connect failed: ${e.message}"
+        log.error "[BambuP1S] MQTT connect failed: ${e.class.simpleName} — ${e.message}"
         sendEvent(name: "connectionStatus", value: "disconnected")
+        scheduleReconnect()
     }
 }
 
 def disconnect() {
+    unschedule("connect")          // cancel any pending reconnect
+    state.reconnectDelay = 0      // reset backoff for next manual connect
     try {
         interfaces.mqtt.disconnect()
     } catch (e) {
@@ -191,12 +243,27 @@ def disconnect() {
     sendEvent(name: "connectionStatus", value: "disconnected")
 }
 
+// Exponential back-off reconnect: 30 s → 60 s → 120 s → 300 s (cap), then holds.
+// The counter is reset to 0 whenever a connection succeeds.
+private void scheduleReconnect() {
+    int delay
+    int attempt = (state.reconnectDelay ?: 0) as int
+    if (attempt == 0)        { delay = 30  }
+    else if (attempt <= 30)  { delay = 60  }
+    else if (attempt <= 60)  { delay = 120 }
+    else                     { delay = 300 }
+    state.reconnectDelay = delay
+    log.info "[BambuP1S] Reconnect scheduled in ${delay} s"
+    runIn(delay, "connect")
+}
+
 // Called by the platform when MQTT connection state changes
 def mqttClientStatus(String status) {
     debugLog("mqttClientStatus: ${status}")
 
     if (status.startsWith("Status: Connection succeeded")) {
         log.info "[BambuP1S] MQTT connected"
+        state.reconnectDelay = 0   // reset backoff on successful connect
         sendEvent(name: "connectionStatus", value: "connected")
 
         // Subscribe to the printer's report topic
@@ -210,8 +277,7 @@ def mqttClientStatus(String status) {
     } else {
         log.warn "[BambuP1S] MQTT status: ${status}"
         sendEvent(name: "connectionStatus", value: "disconnected")
-        // Attempt reconnect after 30 s
-        runIn(30, "connect")
+        scheduleReconnect()
     }
 }
 
@@ -292,6 +358,7 @@ private void processPrintReport(Map json) {
                 String lightState = (light.mode == "on") ? "on" : "off"
                 sendEvent(name: "chamberLight", value: lightState)
                 sendEvent(name: "switch",       value: lightState)  // capability alias
+                syncChamberLightChild(lightState)
             }
         }
     }
@@ -365,6 +432,7 @@ def lightOn() {
     ])
     sendEvent(name: "chamberLight", value: "on")
     sendEvent(name: "switch",       value: "on")
+    syncChamberLightChild("on")
 }
 
 def lightOff() {
@@ -382,6 +450,7 @@ def lightOff() {
     ])
     sendEvent(name: "chamberLight", value: "off")
     sendEvent(name: "switch",       value: "off")
+    syncChamberLightChild("off")
 }
 
 // Switch capability aliases for Rule Machine / dashboard convenience
@@ -441,6 +510,7 @@ private void initializeState() {
     sendEvent(name: "printRemaining",   value: "—")
     sendEvent(name: "chamberLight",     value: "off")
     sendEvent(name: "switch",           value: "off")
+    syncChamberLightChild("off")
     sendEvent(name: "filamentType",     value: "—")
     sendEvent(name: "filamentColor",    value: "#000000")
     sendEvent(name: "currentFile",      value: "—")
