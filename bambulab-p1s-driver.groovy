@@ -144,8 +144,25 @@ private void scheduleRefresh() {
 }
 
 def scheduledRefresh() {
-    refresh()
-    scheduleRefresh()
+    // If no MQTT message has arrived in 3× the refresh interval, the connection
+    // is silently dead — force a full reconnect rather than just sending pushall
+    // into the void.
+    int interval = (settings.refreshInterval ?: 120) as int
+    long silenceMs = now() - (state.lastMessageTime ?: 0)
+    if (state.lastMessageTime && silenceMs > (interval * 3 * 1000)) {
+        log.warn "[BambuP1S] No MQTT messages for ${silenceMs / 1000}s — forcing reconnect"
+        disconnect()
+        pauseExecution(1000)
+        connect()
+    }
+
+    try {
+        refresh()
+    } catch (e) {
+        log.error "[BambuP1S] Error during scheduled refresh: ${e.message}"
+    } finally {
+        scheduleRefresh()
+    }
 }
 
 def uninstalled() {
@@ -293,12 +310,19 @@ def mqttClientStatus(String status) {
 def parse(String event) {
     def msg = interfaces.mqtt.parseMessage(event)
     debugLog("Received on ${msg.topic}: ${msg.payload}")
+    state.lastMessageTime = now()
 
+    Map json
     try {
-        def json = new groovy.json.JsonSlurper().parseText(msg.payload)
-        processPrintReport(json)
+        json = new groovy.json.JsonSlurper().parseText(msg.payload)
     } catch (e) {
         log.error "[BambuP1S] JSON parse error: ${e.message}"
+        return
+    }
+    try {
+        processPrintReport(json)
+    } catch (e) {
+        log.error "[BambuP1S] Error processing message: ${e.message}"
     }
 }
 
