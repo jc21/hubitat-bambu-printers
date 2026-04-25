@@ -395,7 +395,8 @@ private void processPrintReport(Map json) {
 
     // ── Current file ───────────────────────────────────────────
     if (p.containsKey("gcode_file")) {
-        String fileName = (p.gcode_file as String).tokenize("/").last()
+        List parts = (p.gcode_file as String).tokenize("/")
+        String fileName = parts ? parts.last() : ""
         sendEvent(name: "currentFile", value: fileName ?: "—")
     }
 
