@@ -343,6 +343,16 @@ def parse(String event) {
     }
     debugLog("Payload: ${groovy.json.JsonOutput.toJson(json)}")
 
+    if (json?.system) {
+        def sys = json.system
+        if (sys?.result == "failed") {
+            log.warn "[BambuPrinter] System command failed — command: ${sys?.command}, reason: ${sys?.reason}, err_code: ${sys?.err_code}"
+        } else {
+            debugLog("System response: command=${sys?.command}, result=${sys?.result}")
+        }
+        return
+    }
+
     if (!json?.print) {
         log.info "[BambuPrinter] Message has no 'print' key (top-level keys: ${json?.keySet()})"
         return
@@ -560,7 +570,13 @@ private void publishCommand(Map payload) {
     String topic   = "device/${printerSerial}/request"
     String jsonStr = groovy.json.JsonOutput.toJson(payload)
     log.info "[BambuPrinter] Publishing to ${topic}: ${jsonStr}"
-    interfaces.mqtt.publish(topic, jsonStr, 1, false)
+    try {
+        interfaces.mqtt.publish(topic, jsonStr, 1, false)
+    } catch (e) {
+        log.error "[BambuPrinter] MQTT publish failed: ${e.message}"
+        sendEvent(name: "connectionStatus", value: "disconnected")
+        scheduleReconnect()
+    }
 }
 
 private void initializeState() {
