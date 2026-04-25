@@ -1,7 +1,7 @@
 /**
- *  Bambu Lab P1S Manager - Hubitat App
+ *  Bambu Lab Printer Manager - Hubitat App
  *
- *  Companion app for the "Bambu Lab P1S" driver.
+ *  Companion app for the "Bambu Lab Printer" driver.
  *  Provides:
  *    • Notification alerts (print finished, errors, filament changes)
  *    • Automation triggers (turn on a switch when printing starts / stops)
@@ -10,15 +10,15 @@
  *
  *  Installation:
  *    1. In Hubitat UI → Apps Code → New App → paste this file → Save
- *    2. Apps → Add User App → "Bambu Lab P1S Manager"
+ *    2. Apps → Add User App → "Bambu Lab Printer Manager"
  *    3. Configure preferences and click Done
  */
 
 definition(
-    name:        "Bambu Lab P1S Manager",
-    namespace:   "community",
+    name:        "Bambu Lab Printer Manager",
+    namespace:   "jonnyborbs",
     author:      "Custom App",
-    description: "Automation and notifications for your Bambu Lab P1S 3D printer",
+    description: "Automation and notifications for your Bambu Lab 3D printer",
     category:    "Convenience",
     iconUrl:     "",
     iconX2Url:   ""
@@ -35,15 +35,15 @@ preferences {
 }
 
 def mainPage() {
-    dynamicPage(name: "mainPage", title: "Bambu Lab P1S Manager", install: true, uninstall: true) {
+    dynamicPage(name: "mainPage", title: "Bambu Lab Printer Manager", install: true, uninstall: true) {
 
         section("Printer Device") {
             input "printerDevice",
-                  "device.BambuLabP1S",
-                  title: "Select your Bambu Lab P1S device",
+                  "device.BambuLabPrinter",
+                  title: "Select your Bambu Lab printer device",
                   required: true,
                   multiple: false
-            paragraph "The device above must be created using the 'Bambu Lab P1S' driver " +
+            paragraph "The device above must be created using the 'Bambu Lab Printer' driver " +
                        "and have its IP, serial, and LAN access code configured."
         }
 
@@ -219,10 +219,12 @@ def initialize() {
     // Update summary tile every minute
     schedule("0 * * * * ?", "updateSummary")
 
-    // Keep state
-    state.lastStatus         = printerDevice.currentValue("printerStatus") ?: "unknown"
-    state.lastFilamentType   = printerDevice.currentValue("filamentType")  ?: "—"
-    state.milestonesReported = []
+    // Keep state — only reset milestones if not mid-print to avoid re-firing notifications
+    state.lastStatus       = printerDevice.currentValue("printerStatus") ?: "unknown"
+    state.lastFilamentType = printerDevice.currentValue("filamentType")  ?: "—"
+    if (printerDevice.currentValue("printerStatus") != "printing") {
+        state.milestonesReported = []
+    }
 
     log.info "[BambuApp] Subscriptions registered"
     updateSummary()
@@ -243,7 +245,7 @@ def onPrinterStatusChange(evt) {
         state.milestonesReported = []
         if (notifyOnStart) {
             String file = printerDevice.currentValue("currentFile") ?: "unknown file"
-            sendNotification("🖨️ Bambu P1S started printing: ${file}")
+            sendNotification("🖨️ Bambu printer started printing: ${file}")
         }
         runAutomation("start")
         if (autoLightWithPrint) printerDevice.lightOn()
@@ -254,7 +256,7 @@ def onPrinterStatusChange(evt) {
         if (notifyOnFinish) {
             String file    = printerDevice.currentValue("currentFile") ?: "unknown file"
             String elapsed = printerDevice.currentValue("printElapsed") ?: "—"
-            sendNotification("✅ Bambu P1S finished: ${file} (elapsed: ${elapsed})")
+            sendNotification("✅ Bambu printer finished: ${file} (elapsed: ${elapsed})")
         }
         runAutomation("end")
         if (autoLightWithPrint) printerDevice.lightOff()
@@ -262,13 +264,13 @@ def onPrinterStatusChange(evt) {
 
     // ── Paused ─────────────────────────────────────────────────
     if (newStatus == "paused" && notifyOnPause) {
-        sendNotification("⏸️ Bambu P1S print paused")
+        sendNotification("⏸️ Bambu printer print paused")
     }
 
     // ── Error ──────────────────────────────────────────────────
     if (newStatus == "error") {
         if (notifyOnError) {
-            sendNotification("🚨 Bambu P1S printer error! Check the printer.")
+            sendNotification("🚨 Bambu printer printer error! Check the printer.")
         }
         runAutomation("error")
     }
@@ -290,7 +292,7 @@ def onProgressChange(evt) {
         if (pct >= m && !(m in fired)) {
             fired << m
             String file = printerDevice.currentValue("currentFile") ?: "unknown file"
-            sendNotification("📊 Bambu P1S is ${m}% complete — ${file}")
+            sendNotification("📊 Bambu printer is ${m}% complete — ${file}")
         }
     }
     state.milestonesReported = fired
@@ -302,7 +304,7 @@ def onFilamentTypeChange(evt) {
     String prevType = state.lastFilamentType ?: "—"
 
     if (newType != prevType && prevType != "—" && notifyOnFilamentChange) {
-        sendNotification("🧵 Bambu P1S filament changed: ${prevType} → ${newType}")
+        sendNotification("🧵 Bambu printer filament changed: ${prevType} → ${newType}")
     }
     state.lastFilamentType = newType
     updateSummary()

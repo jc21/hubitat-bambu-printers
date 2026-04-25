@@ -1,7 +1,8 @@
 /**
- *  Bambu Lab P1S 3D Printer - Hubitat Driver
+ *  Bambu Lab 3D Printer - Hubitat Driver
  *
- *  Communicates with the Bambu Lab P1S over its local MQTT broker (port 8883, TLS).
+ *  Compatible with Bambu Lab printers that support local MQTT (P1S, P1P, X1C, A1, A1 Mini, P2S, etc.).
+ *  Communicates over the printer's local MQTT broker (port 8883, TLS).
  *  No cloud account required — uses LAN access code only.
  *
  *  Attributes exposed:
@@ -25,7 +26,7 @@
  *
  *  Installation:
  *    1. In Hubitat UI → Drivers Code → New Driver → paste this file → Save
- *    2. Devices → Add Device → Virtual → choose "Bambu Lab P1S"
+ *    2. Devices → Add Device → Virtual → choose "Bambu Lab Printer"
  *    3. Fill in Preferences: Printer IP, Serial Number, LAN Access Code
  *    4. Save Preferences — the driver will connect automatically
  *
@@ -44,10 +45,10 @@
 
 metadata {
     definition(
-        name: "Bambu Lab P1S",
+        name: "Bambu Lab Printer",
         namespace: "jonnyborbs",
         author: "Jon Schulman",
-        description: "Monitor and control a Bambu Lab P1S 3D printer via local MQTT"
+        description: "Monitor and control a Bambu Lab 3D printer via local MQTT (P1S, P1P, X1C, A1, A1 Mini, P2S)"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -82,7 +83,7 @@ metadata {
         input name: "printerIP",
               type: "text",
               title: "Printer IP Address",
-              description: "Static LAN IP of your P1S (e.g. 192.168.1.50)",
+              description: "Static LAN IP of your printer (e.g. 192.168.1.50)",
               required: true
 
         input name: "printerSerial",
@@ -130,21 +131,22 @@ metadata {
 // ──────────────────────────────────────────────────────────────
 
 def installed() {
-    log.info "[BambuP1S] Driver installed"
+    log.info "[BambuPrinter] Driver installed"
     state.printStartTime = null
-    initializeState()
-    createChamberLightChild()
-}
-
-def updated() {
-    log.info "[BambuP1S] Preferences saved — reconnecting"
-    disconnect()
-    pauseExecution(1000)
     initialize()
 }
 
+def updated() {
+    log.info "[BambuPrinter] Preferences saved — reconnecting"
+    unschedule()
+    disconnect()
+    pauseExecution(1000)
+    connect()
+    scheduleRefresh()
+}
+
 def initialize() {
-    log.info "[BambuP1S] Initializing"
+    log.info "[BambuPrinter] Initializing"
     initializeState()
     createChamberLightChild()
     connect()
@@ -159,23 +161,23 @@ private void scheduleRefresh() {
 def scheduledRefresh() {
     // If no MQTT message has arrived in 3× the refresh interval, the connection
     // is silently dead — force a full reconnect rather than just sending pushall
-    // into the void.
+    // into the void. mqttClientStatus() will call refresh() on success, so skip it here.
     int interval = (settings.refreshInterval ?: 120) as int
     long silenceMs = now() - (state.lastMessageTime ?: 0)
     if (state.lastMessageTime && silenceMs > (interval * 3 * 1000)) {
-        log.warn "[BambuP1S] No MQTT messages for ${silenceMs / 1000}s — forcing reconnect"
+        log.warn "[BambuPrinter] No MQTT messages for ${silenceMs / 1000}s — forcing reconnect"
         disconnect()
         pauseExecution(1000)
         connect()
+    } else {
+        try {
+            refresh()
+        } catch (e) {
+            log.error "[BambuPrinter] Error during scheduled refresh: ${e.message}"
+        }
     }
 
-    try {
-        refresh()
-    } catch (e) {
-        log.error "[BambuP1S] Error during scheduled refresh: ${e.message}"
-    } finally {
-        scheduleRefresh()
-    }
+    scheduleRefresh()
 }
 
 def uninstalled() {
@@ -194,9 +196,9 @@ private void createChamberLightChild() {
         try {
             addChildDevice("hubitat", "Generic Component Switch", childDni,
                 [name: "${device.displayName} Chamber Light", isComponent: false])
-            log.info "[BambuP1S] Chamber light child device created"
+            log.info "[BambuPrinter] Chamber light child device created"
         } catch (e) {
-            log.error "[BambuP1S] Failed to create chamber light child device: ${e.message}"
+            log.error "[BambuPrinter] Failed to create chamber light child device: ${e.message}"
         }
     }
 }
@@ -235,8 +237,8 @@ private void syncChamberLightChild(String lightState) {
 // ──────────────────────────────────────────────────────────────
 
 def connect() {
-    if (!printerIP || !printerSerial || !lanAccessCode) {
-        log.warn "[BambuP1S] Cannot connect — preferences incomplete"
+    if (!settings.printerIP || !settings.printerSerial || !settings.lanAccessCode) {
+        log.warn "[BambuPrinter] Cannot connect — preferences incomplete"
         return
     }
 
@@ -246,7 +248,7 @@ def connect() {
         ? "tcp://${settings.mqttRelayHost}:${settings.mqttRelayPort ?: 1883}"
         : "ssl://${printerIP}:8883"
 
-    log.info "[BambuP1S] Connecting to ${broker}${usingRelay ? ' (via relay)' : ' (direct SSL)'}"
+    log.info "[BambuPrinter] Connecting to ${broker}${usingRelay ? ' (via relay)' : ' (direct SSL)'}"
 
     try {
         if (usingRelay) {
@@ -260,15 +262,16 @@ def connect() {
         String reason = e.message ?: e.class.simpleName
         if (e.hasProperty("reasonCode")) reason += " (code ${e.reasonCode})"
         if (e.cause)                     reason += " caused by: ${e.cause.message}"
-        log.error "[BambuP1S] MQTT connect failed: ${reason}"
+        log.error "[BambuPrinter] MQTT connect failed: ${reason}"
         sendEvent(name: "connectionStatus", value: "disconnected")
         scheduleReconnect()
     }
 }
 
 def disconnect() {
-    unschedule("connect")          // cancel any pending reconnect
-    state.reconnectDelay = 0      // reset backoff for next manual connect
+    state.suppressReconnect = true  // prevent mqttClientStatus callback from re-scheduling
+    unschedule("connect")           // cancel any pending reconnect
+    state.reconnectDelay = 0        // reset backoff for next manual connect
     try {
         interfaces.mqtt.disconnect()
     } catch (e) {
@@ -287,7 +290,7 @@ private void scheduleReconnect() {
     else if (attempt <= 60)  { delay = 120 }
     else                     { delay = 300 }
     state.reconnectDelay = delay
-    log.info "[BambuP1S] Reconnect scheduled in ${delay} s"
+    log.info "[BambuPrinter] Reconnect scheduled in ${delay} s"
     runIn(delay, "connect")
 }
 
@@ -296,23 +299,30 @@ def mqttClientStatus(String status) {
     debugLog("mqttClientStatus: ${status}")
 
     if (status.startsWith("Status: Connection succeeded")) {
-        log.info "[BambuP1S] MQTT connected"
+        log.info "[BambuPrinter] MQTT connected"
         state.reconnectDelay = 0   // reset backoff on successful connect
         sendEvent(name: "connectionStatus", value: "connected")
 
-        // Subscribe to the printer's report topic
-        String reportTopic = "device/${printerSerial}/report"
-        interfaces.mqtt.subscribe(reportTopic, 1)
-        log.info "[BambuP1S] Subscribed to: ${reportTopic}"
-
-        // Request a full push immediately
-        pauseExecution(500)
-        refresh()
+        // Defer subscribe outside this callback — calling interfaces.mqtt.subscribe()
+        // directly inside mqttClientStatus() silently fails on some Hubitat versions
+        // because the MQTT client hasn't fully transitioned to connected state yet.
+        runIn(1, "subscribeAndRefresh")
     } else {
-        log.warn "[BambuP1S] MQTT status: ${status}"
+        log.warn "[BambuPrinter] MQTT status: ${status}"
         sendEvent(name: "connectionStatus", value: "disconnected")
-        scheduleReconnect()
+        if (!state.suppressReconnect) {
+            scheduleReconnect()
+        }
+        state.suppressReconnect = false
     }
+}
+
+def subscribeAndRefresh() {
+    String reportTopic = "device/${settings.printerSerial}/report"
+    interfaces.mqtt.subscribe(reportTopic, 1)
+    log.info "[BambuPrinter] Subscribed to: ${reportTopic}"
+    pauseExecution(500)
+    refresh()
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -321,36 +331,38 @@ def mqttClientStatus(String status) {
 
 def parse(String event) {
     def msg = interfaces.mqtt.parseMessage(event)
-    log.info "[BambuP1S] Message received on ${msg.topic}"
-    debugLog("Payload: ${msg.payload}")
+    debugLog("Message received on ${msg.topic}")
     state.lastMessageTime = now()
 
     Map json
     try {
         json = new groovy.json.JsonSlurper().parseText(msg.payload)
     } catch (e) {
-        log.error "[BambuP1S] JSON parse error: ${e.message}"
+        log.error "[BambuPrinter] JSON parse error: ${e.message}"
         return
     }
+    debugLog("Payload: ${groovy.json.JsonOutput.toJson(json)}")
 
     if (!json?.print) {
-        log.info "[BambuP1S] Message has no 'print' key (top-level keys: ${json?.keySet()})"
+        log.info "[BambuPrinter] Message has no 'print' key (top-level keys: ${json?.keySet()})"
         return
     }
 
     try {
         processPrintReport(json)
     } catch (e) {
-        log.error "[BambuP1S] Error processing message: ${e.message}"
+        log.error "[BambuPrinter] Error processing message: ${e.message}"
     }
 }
 
 private void processPrintReport(Map json) {
     def p = json.print
 
+    // Parse gcode_state once; used for both status event and elapsed-time tracking below
+    String rawState = p.containsKey("gcode_state") ? (p.gcode_state as String).toLowerCase() : null
+
     // ── Printer state ──────────────────────────────────────────
-    if (p.containsKey("gcode_state")) {
-        String rawState = (p.gcode_state as String).toLowerCase()
+    if (rawState != null) {
         String status = mapGcodeState(rawState)
         sendEvent(name: "printerStatus", value: status, descriptionText: "Printer status: ${status}")
     }
@@ -370,8 +382,7 @@ private void processPrintReport(Map json) {
     // ── Elapsed time (computed from print_real_action / subtask_id presence) ──
     // The printer does not always report elapsed time directly on P1 series;
     // we track it ourselves from when printing starts.
-    if (p.containsKey("gcode_state")) {
-        String rawState = (p.gcode_state as String).toLowerCase()
+    if (rawState != null) {
         if (rawState == "running") {
             if (!state.printStartTime) {
                 state.printStartTime = now()
@@ -472,8 +483,8 @@ def lightOn() {
             led_mode:      "on",
             led_on_time:   500,
             led_off_time:  500,
-            loop_times:    1,
-            interval_time: 1000
+            loop_times:    0,
+            interval_time: 0
         ]
     ])
     sendEvent(name: "chamberLight", value: "on")
@@ -507,7 +518,9 @@ def pausePrint() {
     publishCommand([
         print: [
             sequence_id: nextSeq(),
-            command:     "pause"
+            command:     "pause",
+            param:       "",
+            user_id:     "0"
         ]
     ])
 }
@@ -516,7 +529,9 @@ def resumePrint() {
     publishCommand([
         print: [
             sequence_id: nextSeq(),
-            command:     "resume"
+            command:     "resume",
+            param:       "",
+            user_id:     "0"
         ]
     ])
 }
@@ -525,7 +540,9 @@ def stopPrint() {
     publishCommand([
         print: [
             sequence_id: nextSeq(),
-            command:     "stop"
+            command:     "stop",
+            param:       "",
+            user_id:     "0"
         ]
     ])
 }
@@ -536,12 +553,12 @@ def stopPrint() {
 
 private void publishCommand(Map payload) {
     if (device.currentValue("connectionStatus") != "connected") {
-        log.warn "[BambuP1S] Cannot publish — not connected"
+        log.warn "[BambuPrinter] Cannot publish — not connected"
         return
     }
     String topic   = "device/${printerSerial}/request"
     String jsonStr = groovy.json.JsonOutput.toJson(payload)
-    log.info "[BambuP1S] Publishing to ${topic}: ${jsonStr}"
+    log.info "[BambuPrinter] Publishing to ${topic}: ${jsonStr}"
     interfaces.mqtt.publish(topic, jsonStr, 1, false)
 }
 
@@ -581,6 +598,7 @@ private String mapGcodeState(String raw) {
     }
 }
 
+// Printer reports remaining time in whole minutes; seconds are always :00 by design
 private String formatMinutes(int totalMinutes) {
     if (totalMinutes <= 0) return "0:00:00"
     int h = totalMinutes / 60
@@ -613,6 +631,6 @@ private String trayColorToHex(String raw) {
 
 private void debugLog(String msg) {
     if (settings.enableDebug) {
-        log.debug "[BambuP1S] ${msg}"
+        log.debug "[BambuPrinter] ${msg}"
     }
 }

@@ -1,6 +1,6 @@
-# Bambu Lab P1S — Hubitat Integration
+# Bambu Lab 3D Printer — Hubitat Integration
 
-A custom Hubitat Elevation driver and companion app for monitoring and controlling your **Bambu Lab P1S** 3D printer directly from your home automation platform — no cloud required.
+A custom Hubitat Elevation driver and companion app for monitoring and controlling your **Bambu Lab** 3D printer directly from your home automation platform — no cloud required.
 
 Communication happens over the printer's built-in local MQTT broker (TLS, port 8883) using your LAN access code. Once installed, the printer appears as a standard Hubitat device with attributes you can read in dashboards, trigger on in Rule Machine, and act on through automations.
 
@@ -30,7 +30,7 @@ The chamber light also appears as an independently controllable child device.
 ## Requirements
 
 - **Hubitat Elevation** hub — tested on firmware 2.4.4.156 (C-8 Pro), but should work on any recent version
-- **Bambu Lab P1S** printer with firmware that exposes a local MQTT broker
+- **Bambu Lab** 3D printer with firmware that exposes a local MQTT broker
 - A **static IP address** assigned to your printer in your router
 - The printer's **LAN Access Code** (found on the touchscreen)
 - The printer's **Serial Number** (found on the touchscreen or in Bambu Studio)
@@ -43,8 +43,8 @@ The chamber light also appears as an independently controllable child device.
 
 | File | Purpose |
 |---|---|
-| `bambulab-p1s-driver.groovy` | Hubitat device driver — handles MQTT, parses printer telemetry, exposes attributes and commands |
-| `bambulab-p1s-app.groovy` | Hubitat user app — notifications, automations, and dashboard summary |
+| `bambulab-printer-driver.groovy` | Hubitat device driver — handles MQTT, parses printer telemetry, exposes attributes and commands |
+| `bambulab-printer-app.groovy` | Hubitat user app — notifications, automations, and dashboard summary |
 
 ---
 
@@ -64,14 +64,14 @@ Before installing anything in Hubitat, collect the following from your printer's
 
 1. In the Hubitat web UI, go to **Drivers Code** (under Developer Tools in the sidebar).
 2. Click **New Driver**.
-3. Paste the full contents of `bambulab-p1s-driver.groovy`.
+3. Paste the full contents of `bambulab-printer-driver.groovy`.
 4. Click **Save**.
 
 ### 3. Create the Device
 
 1. Go to **Devices** → **Add Device** → **Virtual**.
 2. Give the device a name (e.g. *Bambu P1S Printer*).
-3. Set the **Type** to **Bambu Lab P1S**.
+3. Set the **Type** to **Bambu Lab Printer**.
 4. Click **Create Device**.
 5. On the device detail page, scroll to **Preferences** and fill in:
    - **Printer IP Address** — e.g. `192.168.1.50`
@@ -86,7 +86,7 @@ If the connection succeeds, you will see **connectionStatus: connected** in the 
 ### 4. Install the App
 
 1. Go to **Apps Code** → **New App**.
-2. Paste the full contents of `bambulab-p1s-app.groovy`.
+2. Paste the full contents of `bambulab-printer-app.groovy`.
 3. Click **Save**.
 4. Go to **Apps** → **Add User App** → **Bambu Lab P1S Manager**.
 5. Select your printer device and configure notifications and automations as desired.
