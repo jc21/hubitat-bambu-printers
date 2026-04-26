@@ -296,9 +296,10 @@ private void connectBroker(String broker, String username, String password, bool
     String clientId = "hubitat-bambu-${settings.printerSerial}"
     log.info "[BambuPrinter] Connecting to ${broker}"
     try {
-        Map options = ignoreSSL ? [ignoreSSLIssues: true] : [:]
-        if (username) {
-            interfaces.mqtt.connect(broker, clientId, username, password, options)
+        if (username && ignoreSSL) {
+            interfaces.mqtt.connect(broker, clientId, username, password, ignoreSSLIssues: true)
+        } else if (username) {
+            interfaces.mqtt.connect(broker, clientId, username, password)
         } else {
             interfaces.mqtt.connect(broker, clientId, null, null)
         }
