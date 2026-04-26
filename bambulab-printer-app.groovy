@@ -371,6 +371,7 @@ def updateSummary() {
     String nozzle    = printerDevice.currentValue("nozzleTemp")     ?: "—"
     String bed       = printerDevice.currentValue("bedTemp")        ?: "—"
     String conn      = printerDevice.currentValue("connectionStatus") ?: "disconnected"
+    String mode      = printerDevice.currentValue("connectionMode")   ?: "local"
 
     String emoji = statusEmoji(status)
     String summary =
@@ -379,7 +380,7 @@ def updateSummary() {
         "Elapsed: ${elapsed}  |  Remaining: ${remaining}\n" +
         "Filament: ${filament} (${color})\n" +
         "Nozzle: ${nozzle}°C  |  Bed: ${bed}°C\n" +
-        "Light: ${light}  |  MQTT: ${conn}"
+        "Light: ${light}  |  MQTT: ${conn} (${mode})"
 
     try {
         summaryDevice.sendEvent(name: "bambuSummary", value: summary)

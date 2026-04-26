@@ -126,6 +126,7 @@ If the connection succeeds, you will see **connectionStatus: connected** in the 
 | `nozzleTemp` | number | `220` | Current nozzle temperature in °C |
 | `bedTemp` | number | `65` | Current bed temperature in °C |
 | `connectionStatus` | string | `connected` | MQTT connection state: `connected` or `disconnected` |
+| `connectionMode` | string | `cloud - commands enabled` | How the driver is connected: `cloud - commands enabled` (Bambu cloud MQTT, all commands available) or `local - read only` (local MQTT only, control commands unavailable on cloud-connected printers) |
 
 ### Commands
 

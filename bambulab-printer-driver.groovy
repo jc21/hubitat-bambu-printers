@@ -75,6 +75,7 @@ metadata {
         attribute "nozzleTemp",       "number"
         attribute "bedTemp",          "number"
         attribute "connectionStatus", "string"    // connected|disconnected
+        attribute "connectionMode",   "string"    // cloud|local
 
         // --- Commands ---
         command "lightOn"
@@ -349,6 +350,7 @@ def mqttClientStatus(String status) {
         log.info "[BambuPrinter] MQTT connected"
         state.reconnectDelay = 0   // reset backoff on successful connect
         sendEvent(name: "connectionStatus", value: "connected")
+        sendEvent(name: "connectionMode",   value: state.usingCloudMqtt ? "cloud - commands enabled" : "local - read only")
 
         // Defer subscribe outside this callback — calling interfaces.mqtt.subscribe()
         // directly inside mqttClientStatus() silently fails on some Hubitat versions
@@ -639,6 +641,7 @@ private void initializeState() {
     // Note: printStartTime is intentionally NOT reset here so that a preferences
     // save mid-print does not lose the elapsed-time reference.
     sendEvent(name: "connectionStatus", value: "disconnected")
+    sendEvent(name: "connectionMode",   value: "local")
     sendEvent(name: "printerStatus",    value: "unknown")
     sendEvent(name: "printProgress",    value: 0)
     sendEvent(name: "printElapsed",     value: "—")
