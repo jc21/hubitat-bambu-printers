@@ -69,6 +69,12 @@ def mainPage() {
 
         section("App Info") {
             paragraph "Printer Status:  ${currentStatus()}"
+            paragraph "<b>What works without cloud credentials:</b> All status monitoring, " +
+                      "notifications, and switch automations.\n" +
+                      "<b>What requires cloud credentials (configured in driver):</b> Chamber light " +
+                      "control and print commands (pause, resume, stop). Cloud credentials must be " +
+                      "a direct Bambu username and password — Sign In with Apple, Google, or " +
+                      "Facebook is not supported."
         }
     }
 }
@@ -172,6 +178,10 @@ def automationsPage() {
         }
 
         section("Chamber Light Automation") {
+            paragraph "<b>⚠️ Requires cloud authentication.</b> Chamber light control only works on " +
+                      "cloud-connected printers when Bambu account credentials are configured in the " +
+                      "driver preferences. A direct Bambu username and password is required — " +
+                      "Sign In with Apple, Google, or Facebook is not supported."
             input "autoLightWithPrint",
                   "bool",
                   title: "Automatically turn chamber light ON when printing starts and OFF when finished",
@@ -361,6 +371,7 @@ def updateSummary() {
     String nozzle    = printerDevice.currentValue("nozzleTemp")     ?: "—"
     String bed       = printerDevice.currentValue("bedTemp")        ?: "—"
     String conn      = printerDevice.currentValue("connectionStatus") ?: "disconnected"
+    String mode      = printerDevice.currentValue("connectionMode")   ?: "local"
 
     String emoji = statusEmoji(status)
     String summary =
@@ -369,7 +380,7 @@ def updateSummary() {
         "Elapsed: ${elapsed}  |  Remaining: ${remaining}\n" +
         "Filament: ${filament} (${color})\n" +
         "Nozzle: ${nozzle}°C  |  Bed: ${bed}°C\n" +
-        "Light: ${light}  |  MQTT: ${conn}"
+        "Light: ${light}  |  MQTT: ${conn} (${mode})"
 
     try {
         summaryDevice.sendEvent(name: "bambuSummary", value: summary)
