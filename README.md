@@ -1,24 +1,16 @@
 # Bambu Lab 3D Printer — Hubitat Integration
 
-A custom Hubitat Elevation driver and companion app for monitoring and controlling your **Bambu Lab** 3D printer directly from your home automation platform.
+A custom Hubitat Elevation driver and companion app for monitoring your **Bambu Lab** 3D printer directly from your home automation platform.
 
-Communication mostly happens over the printer's built-in local MQTT broker (TLS, port 8883) using your LAN access code, though some functions require authenticating the driver with a Bambu account. Once installed, the printer appears as a standard Hubitat device with attributes you can read in dashboards, trigger on in Rule Machine, and act on through automations.
+Communication happens over the printer's built-in local MQTT broker (TLS, port 8883) using your LAN access code — no Bambu cloud account required. Once installed, the printer appears as a standard Hubitat device with attributes you can read in dashboards, trigger on in Rule Machine, and act on through automations.
 
-The chamber light also appears as an independently controllable child device.
+### What this integration does
 
-### What works without a Bambu account
+All **status monitoring** works with just your LAN access code — no Bambu cloud account required: printer state, print progress, elapsed and remaining time, filament type and color, chamber light state, temperatures, and connection status. Notifications and switch automations in the companion app also work with no account.
 
-All **status monitoring** works with just your LAN access code — no Bambu cloud account required:
-printer state, print progress, elapsed and remaining time, filament type and color, temperatures, and connection status. Notifications and switch automations in the companion app also work with no account.
+This is a **read-only** integration. No print control commands (pause, resume, stop) are sent to the printer, and the chamber light state is reported but cannot be toggled from Hubitat. This is due to restrictions Bambu has put in place on executing commands locally against the `system` namespace on printers. Work is ongoing to try and address this limitation in a separate branch, but right now it is not a priority.
 
-### What requires a Bambu account
-
-**Control commands** (chamber light on/off, pause, resume, stop) only work on cloud-connected printers running firmware v01.07 or later when Bambu cloud credentials are configured in the driver. Without credentials the commands are sent but silently ignored by the printer.
-
-> **SSO limitation:** Bambu cloud credentials must be a **direct username and password**. Sign In with Apple, Google, or Facebook does not work because those authentication flows do not expose a password for programmatic use. If you use SSO to log in to Bambu, control commands are not currently supported.
-
-
-**Note** - Only one MQTT connection can be active to a printer at a time. If you have Handy or Studio open, the connection may fail. The driver has error handling for this scenario and should recover gracefully, but I have not tested this extensively yet.
+**Note** — Some printers have limitations on how many  MQTT connections can be active to a printer at a time. If you have several copies of Bambu Handy or Studio open, the driver connection may fail. The driver has error handling for this scenario and should recover gracefully.
 
 ---
 
@@ -29,9 +21,8 @@ printer state, print progress, elapsed and remaining time, filament type and col
 - **Elapsed time** — how long the current job has been running
 - **Remaining time** — printer's own estimate of time left
 - **Filament info** — material type (PLA, PETG, ABS, ASA, …) and color from the AMS or external spool
-- **Chamber light control** — read state and toggle on/off
+- **Chamber light state** — reads the current on/off state (read-only)
 - **Temperature monitoring** — live nozzle and bed temperatures
-- **Print controls** — pause, resume, and stop from Hubitat
 - **Push notifications** — alerts on print start, finish, pause, error, and selectable progress milestones
 - **Switch automations** — turn switches/dimmers on or off when prints start, finish, or encounter errors
 - **Dashboard summary tile** — a formatted single-attribute summary for dashboard widgets
@@ -45,9 +36,6 @@ printer state, print progress, elapsed and remaining time, filament type and col
 - A **static IP address** assigned to your printer in your router
 - The printer's **LAN Access Code** (found on the touchscreen)
 - The printer's **Serial Number** (found on the touchscreen or in Bambu Studio)
-- *(For control commands only)* A **direct Bambu account username and password** — SSO accounts (Apple, Google, Facebook) are not supported
-
-> **Firmware note:** Bambu Lab firmware v01.07 and later requires cloud authentication for control commands (LED control, pause, resume, stop) when the printer is cloud-connected. Status monitoring continues to work without authentication on all firmware versions. The LAN Access Code is always valid regardless of whether LAN-only mode is enabled.
 
 ---
 
@@ -55,7 +43,7 @@ printer state, print progress, elapsed and remaining time, filament type and col
 
 | File | Purpose |
 |---|---|
-| `bambulab-printer-driver.groovy` | Hubitat device driver — handles MQTT, parses printer telemetry, exposes attributes and commands |
+| `bambulab-printer-driver.groovy` | Hubitat device driver — handles MQTT, parses printer telemetry, exposes attributes |
 | `bambulab-printer-app.groovy` | Hubitat user app — notifications, automations, and dashboard summary |
 
 ---
@@ -89,12 +77,9 @@ Before installing anything in Hubitat, collect the following from your printer's
    - **Printer IP Address** — e.g. `192.168.1.50`
    - **Printer Serial Number** — e.g. `01S00C123456789`
    - **LAN Access Code** — e.g. `12345678`
-   - **Bambu Account Username** *(optional)* — your Bambu Lab account email. Required for chamber light and print controls on cloud-connected printers. Does not work with Apple/Google/Facebook SSO.
-   - **Bambu Account Password** *(optional)* — your Bambu Lab password. Used once at connect time to obtain an auth token; not stored in plain text.
-   - **Bambu Cloud Region** *(optional)* — US / Global for most users; China for mainland China accounts.
    - **Status Refresh Interval** — how often (in seconds) to request a full status push from the printer; 120 seconds is a good default
    - **Enable Debug Logging** — turn on temporarily if troubleshooting
-6. Click **Save Preferences**. The driver will connect to the printer's MQTT broker immediately. If cloud credentials are provided, authentication happens at this point — check the Hubitat logs for success or failure.
+6. Click **Save Preferences**. The driver will connect to the printer's MQTT broker immediately.
 
 If the connection succeeds, you will see **connectionStatus: connected** in the device's Current States within a few seconds.
 
@@ -103,7 +88,7 @@ If the connection succeeds, you will see **connectionStatus: connected** in the 
 1. Go to **Apps Code** → **New App**.
 2. Paste the full contents of `bambulab-printer-app.groovy`.
 3. Click **Save**.
-4. Go to **Apps** → **Add User App** → **Bambu Lab P1S Manager**.
+4. Go to **Apps** → **Add User App** → **Bambu Lab Printer Manager**.
 5. Select your printer device and configure notifications and automations as desired.
 6. Click **Done**.
 
@@ -121,35 +106,26 @@ If the connection succeeds, you will see **connectionStatus: connected** in the 
 | `printRemaining` | string | `0:45:00` | Estimated time remaining per printer (H:MM:SS) |
 | `filamentType` | string | `PLA` | Filament material type reported by AMS or external spool |
 | `filamentColor` | string | `#DFE2E3` | Filament color as a hex RGB value |
-| `chamberLight` | string | `on` | Chamber light state: `on` or `off` |
+| `chamberLight` | string | `on` | Chamber light state: `on` or `off` (read-only — reflects printer state, cannot be toggled) |
 | `currentFile` | string | `benchy.gcode` | Name of the gcode file currently printing |
 | `nozzleTemp` | number | `220` | Current nozzle temperature in °C |
 | `bedTemp` | number | `65` | Current bed temperature in °C |
 | `connectionStatus` | string | `connected` | MQTT connection state: `connected` or `disconnected` |
-| `connectionMode` | string | `cloud - commands enabled` | How the driver is connected: `cloud - commands enabled` (Bambu cloud MQTT, all commands available) or `local - read only` (local MQTT only, control commands unavailable on cloud-connected printers) |
 
 ### Commands
 
-| Command | Requires cloud credentials? | Description |
-|---|---|---|
-| `lightOn()` | Yes (on cloud-connected printers, fw v01.07+) | Turn the chamber light on |
-| `lightOff()` | Yes (on cloud-connected printers, fw v01.07+) | Turn the chamber light off |
-| `on()` | Yes | Alias for `lightOn()` — satisfies the Switch capability for Rule Machine |
-| `off()` | Yes | Alias for `lightOff()` |
-| `pausePrint()` | Yes (on cloud-connected printers, fw v01.07+) | Pause the current print job |
-| `resumePrint()` | Yes (on cloud-connected printers, fw v01.07+) | Resume a paused print job |
-| `stopPrint()` | Yes (on cloud-connected printers, fw v01.07+) | Stop (cancel) the current print job |
-| `refresh()` | No | Request a full status push from the printer immediately |
-| `connect()` | No | Manually initiate the MQTT connection |
-| `disconnect()` | No | Disconnect from the MQTT broker |
+| Command | Description |
+|---|---|
+| `refresh()` | Request a full status push from the printer immediately |
+| `connect()` | Manually initiate the MQTT connection |
+| `disconnect()` | Disconnect from the MQTT broker |
 
 ### Capabilities
 
-The driver implements the following Hubitat capabilities, which controls how it appears as a selectable device type in Rule Machine and other apps:
+The driver implements the following Hubitat capabilities:
 
 - `Initialize`
 - `Refresh`
-- `Switch` (mapped to chamber light on/off)
 - `Sensor`
 - `Actuator`
 
@@ -182,8 +158,6 @@ Switches and dimmers can be controlled automatically based on printer events:
 
 An optional **hub mode restriction** lets you limit automations to specific modes (e.g. Home, Away).
 
-The **Auto Chamber Light** option automatically turns the printer's internal light on when printing begins and off when the print finishes.
-
 ### Dashboard Summary Tile
 
 If you select an optional **Summary Virtual Device** in the app, the app writes a formatted multi-line status string to a `bambuSummary` attribute on that device every minute. This is useful for placing a single tile on a Hubitat dashboard that shows all key printer info at a glance. Any device that accepts custom events (such as a Virtual Omni Sensor) will work.
@@ -205,8 +179,6 @@ Light: on  |  MQTT: connected
 The Bambu Lab P1S runs its own MQTT broker on port 8883 with TLS. The printer continuously publishes JSON status messages to the topic `device/{SERIAL}/report` and accepts commands on `device/{SERIAL}/request`.
 
 The driver connects using username `bblp` and your LAN access code as the password. Because the printer uses a self-signed TLS certificate, the driver accepts it without requiring you to import the certificate into Hubitat.
-
-If Bambu cloud credentials are configured, the driver instead authenticates against Bambu's cloud API at connect time to obtain a short-lived auth token, then opens a TLS connection to Bambu's cloud MQTT broker (`us.mqtt.bambulab.com:8883`). Both status reports and control commands flow through this connection. The token is refreshed automatically whenever the driver reconnects (e.g. after a hub restart or connection drop).
 
 The P1 series sends only *changed* fields in each status update (unlike the X1 series, which sends full state every time). The driver accumulates state across updates. A periodic `pushall` command is sent at the configured refresh interval to force the printer to emit a complete state snapshot, which keeps all attributes current even if a change was missed.
 
@@ -234,16 +206,8 @@ Elapsed print time is tracked locally by the driver from the moment it observes 
 **Hub logs show repeated reconnect attempts**
 - If the printer is powered off or unreachable, the driver will attempt to reconnect every 30 seconds. This is intentional. The log entries will stop as soon as the printer comes back online.
 
-**Chamber light / pause / resume / stop commands have no effect**
-- These commands require cloud credentials on cloud-connected printers running firmware v01.07 or later. Without credentials the printer silently ignores them. Configure **Bambu Account Username** and **Bambu Account Password** in the driver preferences.
-- The Hubitat log will show a warning: *"Control command sent without cloud authentication"* when this happens.
-- These preferences require a **direct Bambu username and password**. Sign In with Apple, Google, or Facebook cannot be used.
-
-**Bambu cloud authentication fails at connect time**
-- Check that the username is your Bambu account email address and the password is correct.
-- If your account uses SSO (Apple, Google, Facebook), you do not have a Bambu password and cannot use this feature.
-- Accounts with two-factor authentication (2FA / TOTP) are not currently supported — disable 2FA temporarily to test, then consider using a separate Bambu account without 2FA for the driver.
-- If you recently changed your Bambu password, save the driver preferences again to force re-authentication.
+**`chamberLight` attribute always shows `off`**
+- The chamber light state comes from `lights_report` in the printer's MQTT payload. This field is only included in full state pushes (`pushall`), not in every delta update. If it appears stuck, try clicking **Refresh** on the device page to force a full state request.
 
 ---
 
@@ -255,7 +219,7 @@ Pull requests are welcome. If you encounter a JSON field in your printer's MQTT 
 
 ## Disclaimer
 
-This integration uses an unofficial, reverse-engineered local API. It is not affiliated with or endorsed by Bambu Lab. Use at your own risk. Sending `stopPrint()` or `pausePrint()` commands will affect an active print job — confirm before using these in automations.
+This integration uses an unofficial, reverse-engineered local API. It is not affiliated with or endorsed by Bambu Lab. Use at your own risk.
 
 ---
 

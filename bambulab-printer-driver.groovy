@@ -4,13 +4,7 @@
  *  Compatible with Bambu Lab printers that support local MQTT (P1S, P1P, X1C, A1, A1 Mini, P2S, etc.).
  *  Connects over local MQTT (port 8883, TLS) using your LAN access code.
  *
- *  STATUS MONITORING works for everyone with no cloud account needed.
- *
- *  CONTROL COMMANDS (chamber light, pause, resume, stop) require optional Bambu cloud
- *  credentials on cloud-connected printers running firmware v01.07 or later. Without
- *  credentials the commands are silently ignored by the printer. Cloud credentials must be
- *  a direct Bambu username and password — Sign In with Apple, Google, or Facebook is NOT
- *  supported because those flows do not expose a password for programmatic use.
+ *  STATUS MONITORING only — no control commands. All attributes are read-only.
  *
  *  Attributes exposed:
  *    - printerStatus     : idle / printing / paused / finished / error
@@ -19,15 +13,13 @@
  *    - printRemaining    : HH:MM:SS remaining (from printer estimate)
  *    - filamentType      : e.g. PLA, PETG, ABS, ASA …
  *    - filamentColor     : hex colour reported by AMS tray (#RRGGBB)
- *    - chamberLight      : on / off
+ *    - chamberLight      : on / off (read-only)
  *    - currentFile       : name of the gcode file being printed
  *    - nozzleTemp        : current nozzle temperature (°C)
  *    - bedTemp           : current bed temperature (°C)
  *    - connectionStatus  : connected / disconnected
  *
  *  Commands:
- *    - lightOn()  / lightOff()   : toggle chamber light
- *    - pausePrint() / resumePrint() / stopPrint()
  *    - refresh()                 : request full-status push from printer
  *    - connect() / disconnect()
  *
@@ -55,11 +47,10 @@ metadata {
         name: "Bambu Lab Printer",
         namespace: "jonnyborbs",
         author: "Jon Schulman",
-        description: "Monitor and control a Bambu Lab 3D printer via local MQTT (P1S, P1P, X1C, A1, A1 Mini, P2S)"
+        description: "Monitor a Bambu Lab 3D printer via local MQTT (P1S, P1P, X1C, A1, A1 Mini, P2S)"
     ) {
         capability "Initialize"
         capability "Refresh"
-        capability "Switch"          // maps on()/off() to chamber light for RM convenience
         capability "Sensor"
         capability "Actuator"
 
@@ -70,19 +61,13 @@ metadata {
         attribute "printRemaining",   "string"    // HH:MM:SS
         attribute "filamentType",     "string"
         attribute "filamentColor",    "string"    // #RRGGBB
-        attribute "chamberLight",     "string"    // on|off
+        attribute "chamberLight",     "string"    // on|off (read-only)
         attribute "currentFile",      "string"
         attribute "nozzleTemp",       "number"
         attribute "bedTemp",          "number"
         attribute "connectionStatus", "string"    // connected|disconnected
-        attribute "connectionMode",   "string"    // cloud|local
 
         // --- Commands ---
-        command "lightOn"
-        command "lightOff"
-        command "pausePrint"
-        command "resumePrint"
-        command "stopPrint"
         command "connect"
         command "disconnect"
     }
@@ -119,26 +104,6 @@ metadata {
               defaultValue: 1883,
               required: false
 
-        input name: "bambuUsername",
-              type: "text",
-              title: "Bambu Account Username (optional)",
-              description: "Email address for your Bambu Lab account. Required for chamber light and print controls on cloud-connected printers running firmware v01.07+. Does NOT work with Sign In with Apple, Google, or Facebook — a direct Bambu username and password is required.",
-              required: false
-
-        input name: "bambuPassword",
-              type: "password",
-              title: "Bambu Account Password (optional)",
-              description: "Password for your Bambu Lab account. Used only to obtain a cloud authentication token at connect time.",
-              required: false
-
-        input name: "bambuRegion",
-              type: "enum",
-              title: "Bambu Cloud Region",
-              description: "Your Bambu account region. US / Global is correct for most users outside mainland China.",
-              options: ["US / Global", "China"],
-              defaultValue: "US / Global",
-              required: false
-
         input name: "refreshInterval",
               type: "integer",
               title: "Status Refresh Interval (seconds)",
@@ -166,9 +131,6 @@ def installed() {
 
 def updated() {
     log.info "[BambuPrinter] Preferences saved — reconnecting"
-    state.bambuAuthToken = null   // always re-authenticate when preferences change
-    state.bambuUserId    = null
-    state.usingCloudMqtt = false
     unschedule()
     disconnect()
     pauseExecution(1000)
@@ -179,7 +141,6 @@ def updated() {
 def initialize() {
     log.info "[BambuPrinter] Initializing"
     initializeState()
-    createChamberLightChild()
     connect()
     scheduleRefresh()
 }
@@ -214,53 +175,6 @@ def scheduledRefresh() {
 def uninstalled() {
     disconnect()
     unschedule()
-    deleteChildDevices()
-}
-
-// ──────────────────────────────────────────────────────────────
-//  Child device management
-// ──────────────────────────────────────────────────────────────
-
-private void createChamberLightChild() {
-    String childDni = "${device.deviceNetworkId}-chamberlight"
-    if (!getChildDevice(childDni)) {
-        try {
-            addChildDevice("hubitat", "Generic Component Switch", childDni,
-                [name: "${device.displayName} Chamber Light", isComponent: false])
-            log.info "[BambuPrinter] Chamber light child device created"
-        } catch (e) {
-            log.error "[BambuPrinter] Failed to create chamber light child device: ${e.message}"
-        }
-    }
-}
-
-private void deleteChildDevices() {
-    getChildDevices().each { deleteChildDevice(it.deviceNetworkId) }
-}
-
-// Called by Generic Component Switch child when turned on
-void componentOn(cd) {
-    debugLog("componentOn received from child device")
-    lightOn()
-}
-
-// Called by Generic Component Switch child when turned off
-void componentOff(cd) {
-    debugLog("componentOff received from child device")
-    lightOff()
-}
-
-// Called by Generic Component Switch child on refresh
-void componentRefresh(cd) {
-    debugLog("componentRefresh received from child device")
-    refresh()
-}
-
-private void syncChamberLightChild(String lightState) {
-    def child = getChildDevice("${device.deviceNetworkId}-chamberlight")
-    if (child) {
-        child.parse([[name: "switch", value: lightState, descriptionText: "${child.displayName} is ${lightState}"]])
-    }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -273,22 +187,15 @@ def connect() {
         return
     }
 
-    boolean hasCloudCreds = settings.bambuUsername && settings.bambuPassword
-    boolean usingRelay    = settings.mqttRelayHost as boolean
+    boolean usingRelay = settings.mqttRelayHost as boolean
 
-    if (hasCloudCreds) {
-        if (!state.bambuAuthToken && !authenticateCloud()) return
-        state.usingCloudMqtt = true
-        connectBroker(cloudMqttBroker(), "u_${state.bambuUserId}", state.bambuAuthToken as String, false)
-    } else if (usingRelay) {
-        state.usingCloudMqtt = false
+    if (usingRelay) {
         connectBroker("tcp://${settings.mqttRelayHost}:${settings.mqttRelayPort ?: 1883}", null, null, false)
     } else {
         if (!settings.printerIP || !settings.lanAccessCode) {
             log.warn "[BambuPrinter] Cannot connect — printer IP and LAN access code required"
             return
         }
-        state.usingCloudMqtt = false
         connectBroker("ssl://${settings.printerIP}:8883", "bblp", settings.lanAccessCode as String, true)
     }
 }
@@ -317,7 +224,6 @@ private void connectBroker(String broker, String username, String password, bool
 
 def disconnect() {
     state.suppressReconnect = true  // prevent mqttClientStatus callback from re-scheduling
-    state.usingCloudMqtt    = false
     unschedule("connect")           // cancel any pending reconnect
     state.reconnectDelay = 0        // reset backoff for next manual connect
     try {
@@ -350,7 +256,6 @@ def mqttClientStatus(String status) {
         log.info "[BambuPrinter] MQTT connected"
         state.reconnectDelay = 0   // reset backoff on successful connect
         sendEvent(name: "connectionStatus", value: "connected")
-        sendEvent(name: "connectionMode",   value: state.usingCloudMqtt ? "cloud - commands enabled" : "local - read only")
 
         // Defer subscribe outside this callback — calling interfaces.mqtt.subscribe()
         // directly inside mqttClientStatus() silently fails on some Hubitat versions
@@ -359,11 +264,6 @@ def mqttClientStatus(String status) {
     } else {
         log.warn "[BambuPrinter] MQTT status: ${status}"
         sendEvent(name: "connectionStatus", value: "disconnected")
-        if (state.usingCloudMqtt) {
-            // Clear token so reconnect triggers fresh authentication
-            state.bambuAuthToken = null
-            state.usingCloudMqtt = false
-        }
         if (!state.suppressReconnect) {
             scheduleReconnect()
         }
@@ -396,16 +296,6 @@ def parse(String event) {
         return
     }
     debugLog("Payload: ${groovy.json.JsonOutput.toJson(json)}")
-
-    if (json?.system) {
-        def sys = json.system
-        if (sys?.result == "failed") {
-            log.warn "[BambuPrinter] System command failed — command: ${sys?.command}, reason: ${sys?.reason}, err_code: ${sys?.err_code}"
-        } else {
-            debugLog("System response: command=${sys?.command}, result=${sys?.result}")
-        }
-        return
-    }
 
     if (!json?.print) {
         log.info "[BambuPrinter] Message has no 'print' key (top-level keys: ${json?.keySet()})"
@@ -472,15 +362,12 @@ private void processPrintReport(Map json) {
         sendEvent(name: "bedTemp", value: Math.round(p.bed_temper as double), unit: "°C")
     }
 
-    // ── Chamber light ──────────────────────────────────────────
+    // ── Chamber light (read-only) ──────────────────────────────
     // Reported as a list: lights_report: [{node: "chamber_light", mode: "on"|"off"}]
     if (p.containsKey("lights_report")) {
         p.lights_report.each { light ->
             if (light.node == "chamber_light") {
-                String lightState = (light.mode == "on") ? "on" : "off"
-                sendEvent(name: "chamberLight", value: lightState)
-                sendEvent(name: "switch",       value: lightState)  // capability alias
-                syncChamberLightChild(lightState)
+                sendEvent(name: "chamberLight", value: (light.mode == "on") ? "on" : "off")
             }
         }
     }
@@ -539,79 +426,6 @@ def refresh() {
     ])
 }
 
-def lightOn() {
-    publishCommand([
-        system: [
-            sequence_id:   nextSeq(),
-            command:       "ledctrl",
-            led_node:      "chamber_light",
-            led_mode:      "on",
-            led_on_time:   500,
-            led_off_time:  500,
-            loop_times:    0,
-            interval_time: 0
-        ]
-    ])
-    sendEvent(name: "chamberLight", value: "on")
-    sendEvent(name: "switch",       value: "on")
-    syncChamberLightChild("on")
-}
-
-def lightOff() {
-    publishCommand([
-        system: [
-            sequence_id:   nextSeq(),
-            command:       "ledctrl",
-            led_node:      "chamber_light",
-            led_mode:      "off",
-            led_on_time:   500,
-            led_off_time:  500,
-            loop_times:    0,
-            interval_time: 0
-        ]
-    ])
-    sendEvent(name: "chamberLight", value: "off")
-    sendEvent(name: "switch",       value: "off")
-    syncChamberLightChild("off")
-}
-
-// Switch capability aliases for Rule Machine / dashboard convenience
-def on()  { lightOn()  }
-def off() { lightOff() }
-
-def pausePrint() {
-    publishCommand([
-        print: [
-            sequence_id: nextSeq(),
-            command:     "pause",
-            param:       "",
-            user_id:     "0"
-        ]
-    ])
-}
-
-def resumePrint() {
-    publishCommand([
-        print: [
-            sequence_id: nextSeq(),
-            command:     "resume",
-            param:       "",
-            user_id:     "0"
-        ]
-    ])
-}
-
-def stopPrint() {
-    publishCommand([
-        print: [
-            sequence_id: nextSeq(),
-            command:     "stop",
-            param:       "",
-            user_id:     "0"
-        ]
-    ])
-}
-
 // ──────────────────────────────────────────────────────────────
 //  Helpers
 // ──────────────────────────────────────────────────────────────
@@ -620,9 +434,6 @@ private void publishCommand(Map payload) {
     if (device.currentValue("connectionStatus") != "connected") {
         log.warn "[BambuPrinter] Cannot publish — not connected"
         return
-    }
-    if (!state.usingCloudMqtt && (payload.containsKey("system") || payload.containsKey("print"))) {
-        log.warn "[BambuPrinter] Control command sent without cloud authentication — cloud-connected printers on firmware v01.07+ will silently ignore this. Configure Bambu account credentials in preferences to enable control commands."
     }
     String topic   = "device/${printerSerial}/request"
     String jsonStr = groovy.json.JsonOutput.toJson(payload)
@@ -641,14 +452,11 @@ private void initializeState() {
     // Note: printStartTime is intentionally NOT reset here so that a preferences
     // save mid-print does not lose the elapsed-time reference.
     sendEvent(name: "connectionStatus", value: "disconnected")
-    sendEvent(name: "connectionMode",   value: "local")
     sendEvent(name: "printerStatus",    value: "unknown")
     sendEvent(name: "printProgress",    value: 0)
     sendEvent(name: "printElapsed",     value: "—")
     sendEvent(name: "printRemaining",   value: "—")
     sendEvent(name: "chamberLight",     value: "off")
-    sendEvent(name: "switch",           value: "off")
-    syncChamberLightChild("off")
     sendEvent(name: "filamentType",     value: "—")
     sendEvent(name: "filamentColor",    value: "#000000")
     sendEvent(name: "currentFile",      value: "—")
@@ -696,57 +504,6 @@ private void updateElapsed() {
     } else {
         sendEvent(name: "printElapsed", value: "—")
     }
-}
-
-private boolean authenticateCloud() {
-    String apiHost = (settings.bambuRegion == "China") ? "api.bambulab.cn" : "api.bambulab.com"
-    boolean success = false
-    def params = [
-        uri: "https://${apiHost}/v1/user-service/user/login",
-        contentType: "application/json",
-        requestContentType: "application/json",
-        body: [account: settings.bambuUsername as String, password: settings.bambuPassword as String]
-    ]
-    try {
-        httpPostJson(params) { resp ->
-            if (resp.status == 200 && resp.data?.accessToken) {
-                state.bambuAuthToken = resp.data.accessToken as String
-                state.bambuUserId    = extractUserIdFromJwt(state.bambuAuthToken)
-                log.info "[BambuPrinter] Bambu cloud authentication successful (user ID: ${state.bambuUserId})"
-                success = true
-            } else {
-                log.error "[BambuPrinter] Bambu cloud authentication failed — HTTP ${resp.status}: ${resp.data?.message ?: 'check username and password'}"
-            }
-        }
-    } catch (e) {
-        log.error "[BambuPrinter] Bambu cloud authentication error: ${e.message}"
-    }
-    if (!success) {
-        state.bambuAuthToken = null
-        state.bambuUserId    = null
-    }
-    return success
-}
-
-private String extractUserIdFromJwt(String token) {
-    try {
-        String payloadB64 = token.split("\\.")[1]
-        payloadB64 = payloadB64.replace('-', '+').replace('_', '/')
-        int padding = payloadB64.length() % 4
-        if (padding == 2) payloadB64 += "=="
-        else if (padding == 3) payloadB64 += "="
-        def claims = new groovy.json.JsonSlurper().parseText(new String(payloadB64.decodeBase64()))
-        return (claims?.uid ?: claims?.sub)?.toString()
-    } catch (e) {
-        log.error "[BambuPrinter] Failed to parse auth token: ${e.message}"
-        return null
-    }
-}
-
-private String cloudMqttBroker() {
-    return (settings.bambuRegion == "China")
-        ? "ssl://cn.mqtt.bambulab.com:8883"
-        : "ssl://us.mqtt.bambulab.com:8883"
 }
 
 // Bambu reports tray_color as "RRGGBBAA" hex; we want "#RRGGBB"

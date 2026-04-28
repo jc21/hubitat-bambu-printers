@@ -64,17 +64,11 @@ def mainPage() {
 
             href "automationsPage",
                  title: "⚡ Automations",
-                 description: "Lights, switches, and other actions"
+                 description: "Switches and other actions"
         }
 
         section("App Info") {
             paragraph "Printer Status:  ${currentStatus()}"
-            paragraph "<b>What works without cloud credentials:</b> All status monitoring, " +
-                      "notifications, and switch automations.\n" +
-                      "<b>What requires cloud credentials (configured in driver):</b> Chamber light " +
-                      "control and print commands (pause, resume, stop). Cloud credentials must be " +
-                      "a direct Bambu username and password — Sign In with Apple, Google, or " +
-                      "Facebook is not supported."
         }
     }
 }
@@ -177,17 +171,6 @@ def automationsPage() {
                   required: false
         }
 
-        section("Chamber Light Automation") {
-            paragraph "<b>⚠️ Requires cloud authentication.</b> Chamber light control only works on " +
-                      "cloud-connected printers when Bambu account credentials are configured in the " +
-                      "driver preferences. A direct Bambu username and password is required — " +
-                      "Sign In with Apple, Google, or Facebook is not supported."
-            input "autoLightWithPrint",
-                  "bool",
-                  title: "Automatically turn chamber light ON when printing starts and OFF when finished",
-                  defaultValue: false
-        }
-
         section("Mode Restrictions") {
             input "restrictedModes",
                   "mode",
@@ -224,7 +207,6 @@ def initialize() {
     subscribe(printerDevice, "printerStatus",  "onPrinterStatusChange")
     subscribe(printerDevice, "printProgress",  "onProgressChange")
     subscribe(printerDevice, "filamentType",   "onFilamentTypeChange")
-    subscribe(printerDevice, "chamberLight",   "onChamberLightChange")
 
     // Update summary tile every minute
     schedule("0 * * * * ?", "updateSummary")
@@ -258,7 +240,6 @@ def onPrinterStatusChange(evt) {
             sendNotification("🖨️ Bambu printer started printing: ${file}")
         }
         runAutomation("start")
-        if (autoLightWithPrint) printerDevice.lightOn()
     }
 
     // ── Print finished ─────────────────────────────────────────
@@ -269,7 +250,6 @@ def onPrinterStatusChange(evt) {
             sendNotification("✅ Bambu printer finished: ${file} (elapsed: ${elapsed})")
         }
         runAutomation("end")
-        if (autoLightWithPrint) printerDevice.lightOff()
     }
 
     // ── Paused ─────────────────────────────────────────────────
@@ -320,11 +300,6 @@ def onFilamentTypeChange(evt) {
     updateSummary()
 }
 
-def onChamberLightChange(evt) {
-    log.debug "[BambuApp] Chamber light: ${evt.value}"
-    updateSummary()
-}
-
 // ──────────────────────────────────────────────────────────────
 //  Automations
 // ──────────────────────────────────────────────────────────────
@@ -371,7 +346,6 @@ def updateSummary() {
     String nozzle    = printerDevice.currentValue("nozzleTemp")     ?: "—"
     String bed       = printerDevice.currentValue("bedTemp")        ?: "—"
     String conn      = printerDevice.currentValue("connectionStatus") ?: "disconnected"
-    String mode      = printerDevice.currentValue("connectionMode")   ?: "local"
 
     String emoji = statusEmoji(status)
     String summary =
@@ -380,7 +354,7 @@ def updateSummary() {
         "Elapsed: ${elapsed}  |  Remaining: ${remaining}\n" +
         "Filament: ${filament} (${color})\n" +
         "Nozzle: ${nozzle}°C  |  Bed: ${bed}°C\n" +
-        "Light: ${light}  |  MQTT: ${conn} (${mode})"
+        "Light: ${light}  |  MQTT: ${conn}"
 
     try {
         summaryDevice.sendEvent(name: "bambuSummary", value: summary)
