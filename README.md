@@ -24,7 +24,7 @@ This is a **read-only** integration. No print control commands (pause, resume, s
 - **Chamber light state** — reads the current on/off state (read-only)
 - **Temperature monitoring** — live nozzle and bed temperatures
 - **Push notifications** — alerts on print start, finish, pause, error, and selectable progress milestones
-- **Switch automations** — turn switches/dimmers on or off when prints start, finish, or encounter errors
+- **Switch automations** — turn external switches/dimmers/fans/etc on or off when prints start, finish, or encounter errors
 - **Dashboard summary tile** — a formatted single-attribute summary for dashboard widgets
 
 ---
