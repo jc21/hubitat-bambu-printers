@@ -1,0 +1,33 @@
+{
+  "packageName": "Bambu Lab 3D Printer",
+  "author": "Jon Schulman",
+  "version": "0.1",
+  "minimumHEVersion": "2.3.0",
+  "licenseFile": "https://github.com/jonnyborbs/hubitat-bambu-printers/blob/main/LICENSE",
+  "documentationLink": "https://github.com/jonnyborbs/hubitat-bambu-printers",
+  "communityLink": "https://community.hubitat.com/t/feedback-welcome-bambu-labs-printer-integration-p1s/163161",
+  "dateReleased": "2026-04-28",
+  "releaseNotes": "v0.1 — A read-only monitoring driver and companion app for Bambu Lab 3D printers",
+  "apps": [
+    {
+      "id": "71dbb2ed-7651-474c-9541-0108dc658052",
+      "name": "Bambu Lab Printer Manager",
+      "namespace": "jonnyborbs",
+      "location": "https://raw.githubusercontent.com/jonnyborbs/hubitat-bambu-printers/refs/tags/0.1/bambulab-printer-app.groovy",
+      "required": false,
+      "oauth": false,
+      "primary": false,
+      "description": "Companion app for Bambu Lab 3D Printer"
+    }
+  ],
+  "drivers": [
+    {
+      "id": "73c2ad1c-1b32-4e0d-9b5b-6ddd66d39ef7",
+      "name": "Bambu Lab Printer",
+      "namespace": "jonnyborbs",
+      "location": "https://raw.githubusercontent.com/jonnyborbs/hubitat-bambu-printers/refs/tags/0.1/bambulab-printer-driver.groovy",
+      "required": true,
+      "description": "Driver for Bambu Lab Printer"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "author": "Jon Schulman",
+  "gitHubUrl": "https://github.com/jonnyborbs",
+  "packages": [
+    {
+      "id": "a08f7be4-4fa3-4614-bb0c-1c393913fa77",
+      "name": "Bambu Lab 3D Printer",
+      "category": "Integrations",
+      "location": "https://raw.githubusercontent.com/jonnyborbs/hubitat-bambu-printers/refs/heads/main/packageManifest.json",
+      "description": "A read-only monitoring driver and companion app for Bambu Lab 3D printers",
+      "tags": [
+        "Appliances",
+        "Notifications"
+      ]
+    }
+  ]
+}
